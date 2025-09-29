@@ -194,6 +194,29 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
         }
     }
 
+    let info_embed = CreateEmbed::default()
+        .description(
+            "• Use `/help` or visit [fumiko.dev/commands](https://fumiko.dev/commands) to view this list of commands again.\n\
+            • Visit [fumiko.dev/guide](https://fumiko.dev/guide) for an explanation on how to use Fumiko bot.\n\
+            • Please visit [fumiko.dev/contact](https://fumiko.dev/contact) for additionalif you require assistance or have any questions.",
+        )
+        .color(0xB76E79);
+
+    if let Err(err) = dm_channel
+        .send_message(&ctx.http(), CreateMessage::new().embed(info_embed))
+        .await
+    {
+        let embed = CreateEmbed::default()
+            .title("❌ Couldn't send DM")
+            .description(format!(
+                "I couldn't send you a DM. Please make sure your DMs are open and try again. ({err})",
+            ))
+            .color(0xB76E79);
+        ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
+            .await?;
+        return Ok(());
+    }
+
     let embed = CreateEmbed::default()
         .title("✅ Help sent")
         .description("Check your DMs for the full list of commands.")

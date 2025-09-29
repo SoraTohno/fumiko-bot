@@ -230,7 +230,7 @@ async fn send_welcome_message(
 
     let embed = serenity::CreateEmbed::default()
         .title("Thank you for inviting Fumiko!")
-        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like the announcement channel and pinning/mature content configuration.\n\nVisit [fumiko.dev](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nHappy Reading!")
+        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like the announcement channel and pinning/mature content configuration.\n\nVisit [fumiko.dev/commands](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nYou can visit [fumiko.dev/guide](https://fumiko.dev/guide) for a quick explanation on how to use Fumiko bot.\n\nHappy Reading!")
         .color(0xB76E79);
 
     let message = serenity::CreateMessage::new().embed(embed);

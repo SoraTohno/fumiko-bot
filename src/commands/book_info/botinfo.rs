@@ -24,6 +24,11 @@ pub async fn botinfo(ctx: Context<'_>) -> Result<(), Error> {
             )
             .field("Commands", "Please go to [fumiko.dev/commands](https://fumiko.dev/commands) or use `/help` to see all available commands", false)
             .field(
+                "Getting Started",
+                "Visit [fumiko.dev/guide](https://fumiko.dev/guide) for an explanation on how to use Fumiko bot.",
+                false,
+            )
+            .field(
                 "Server Setup",
                 "Administrators can configure per-server bot settings with `/config`. For information on available config commands, you can use `/setup`.",
                 false,
