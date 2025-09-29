@@ -6,7 +6,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::google_books::{GoogleBooksClient, Volume};
+use crate::google_books::{build_search_query, GoogleBooksClient, Volume};
 use crate::util::truncate_on_char_boundary;
 
 /// Cache configuration constants
@@ -130,6 +130,10 @@ impl CachedGoogleBooksClient {
         }
 
         hex::encode(hasher.finalize())
+    }
+
+    fn generate_combined_search_key(query: &str, max_results: Option<u32>) -> String {
+        Self::generate_search_key("combined", query, None, max_results)
     }
 
     // Clean a Volume to only include necessary fields for caching
@@ -304,9 +308,171 @@ impl CachedGoogleBooksClient {
                     .insert(volume_key, Arc::new(volume.clone()))
                     .await;
             }
+        } else {
+            self.search_cache.insert(cache_key, Arc::new(vec![])).await;
         }
 
         // Return full results
+        Ok(results)
+    }
+
+    pub async fn search_by_genre(
+        &self,
+        genre: &str,
+        max_results: Option<u32>,
+    ) -> Result<Vec<Volume>> {
+        let cache_key = Self::generate_search_key("genre", genre, None, max_results);
+
+        if let Some(cached) = self.search_cache.get(&cache_key).await {
+            self.stats
+                .search_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Ok((*cached).clone());
+        }
+
+        self.stats
+            .search_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .api_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let results = self.client.search_by_genre(genre, max_results).await?;
+
+        let effective_max = max_results.unwrap_or(10).min(40) as usize;
+        let results_to_cache: Vec<Volume> = results
+            .iter()
+            .take(effective_max)
+            .map(|v| Self::clean_volume_for_cache(v))
+            .collect();
+
+        if !results_to_cache.is_empty() {
+            let arc_results = Arc::new(results_to_cache);
+            self.search_cache
+                .insert(cache_key, Arc::clone(&arc_results))
+                .await;
+
+            for volume in arc_results.iter() {
+                let volume_key = format!("volume:{}", volume.id);
+                self.volume_cache
+                    .insert(volume_key, Arc::new(volume.clone()))
+                    .await;
+            }
+        } else {
+            self.search_cache.insert(cache_key, Arc::new(vec![])).await;
+        }
+
+        Ok(results)
+    }
+
+    pub async fn search_by_publisher(
+        &self,
+        publisher: &str,
+        max_results: Option<u32>,
+    ) -> Result<Vec<Volume>> {
+        let cache_key = Self::generate_search_key("publisher", publisher, None, max_results);
+
+        if let Some(cached) = self.search_cache.get(&cache_key).await {
+            self.stats
+                .search_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Ok((*cached).clone());
+        }
+
+        self.stats
+            .search_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .api_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let results = self
+            .client
+            .search_by_publisher(publisher, max_results)
+            .await?;
+
+        let effective_max = max_results.unwrap_or(10).min(40) as usize;
+        let results_to_cache: Vec<Volume> = results
+            .iter()
+            .take(effective_max)
+            .map(|v| Self::clean_volume_for_cache(v))
+            .collect();
+
+        if !results_to_cache.is_empty() {
+            let arc_results = Arc::new(results_to_cache);
+            self.search_cache
+                .insert(cache_key, Arc::clone(&arc_results))
+                .await;
+
+            for volume in arc_results.iter() {
+                let volume_key = format!("volume:{}", volume.id);
+                self.volume_cache
+                    .insert(volume_key, Arc::new(volume.clone()))
+                    .await;
+            }
+        } else {
+            self.search_cache.insert(cache_key, Arc::new(vec![])).await;
+        }
+
+        Ok(results)
+    }
+
+    pub async fn search(
+        &self,
+        query: Option<&str>,
+        author: Option<&str>,
+        genre: Option<&str>,
+        publisher: Option<&str>,
+        max_results: Option<u32>,
+    ) -> Result<Vec<Volume>> {
+        let Some(combined_query) = build_search_query(query, author, genre, publisher) else {
+            return Ok(vec![]);
+        };
+
+        let cache_key = Self::generate_combined_search_key(&combined_query, max_results);
+
+        if let Some(cached) = self.search_cache.get(&cache_key).await {
+            self.stats
+                .search_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Ok((*cached).clone());
+        }
+
+        self.stats
+            .search_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.stats
+            .api_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let results = self
+            .client
+            .search(query, author, genre, publisher, max_results)
+            .await?;
+
+        let effective_max = max_results.unwrap_or(10).min(40) as usize;
+        let results_to_cache: Vec<Volume> = results
+            .iter()
+            .take(effective_max)
+            .map(|v| Self::clean_volume_for_cache(v))
+            .collect();
+
+        if !results_to_cache.is_empty() {
+            let arc_results = Arc::new(results_to_cache);
+            self.search_cache
+                .insert(cache_key, Arc::clone(&arc_results))
+                .await;
+
+            for volume in arc_results.iter() {
+                let volume_key = format!("volume:{}", volume.id);
+                self.volume_cache
+                    .insert(volume_key, Arc::new(volume.clone()))
+                    .await;
+            }
+        } else {
+            self.search_cache.insert(cache_key, Arc::new(vec![])).await;
+        }
+
         Ok(results)
     }
 
@@ -431,8 +597,8 @@ mod tests {
     use anyhow::Result;
     use std::net::TcpListener;
     use std::sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     };
 
     fn make_volume(id: &str) -> Volume {
@@ -510,7 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn author_search_caches_requested_result_count() -> Result<()> {
-        use axum::{Json, Router, extract::State, routing::get};
+        use axum::{extract::State, routing::get, Json, Router};
         use tokio::net::TcpListener as TokioTcpListener;
 
         #[derive(Clone)]
@@ -582,6 +748,174 @@ mod tests {
             .get(&cache_key)
             .await
             .expect("cached author results missing");
+        assert_eq!(cached_entry.len(), volumes.len());
+
+        server_handle.abort();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn caches_genre_search_results() -> Result<()> {
+        use axum::{extract::State, routing::get, Json, Router};
+        use std::net::TcpListener;
+        use tokio::net::TcpListener as TokioTcpListener;
+
+        #[derive(Clone)]
+        struct TestState {
+            volumes: Arc<Vec<Volume>>,
+            request_count: Arc<AtomicUsize>,
+        }
+
+        async fn handler(State(state): State<TestState>) -> Json<SearchResponse> {
+            state.request_count.fetch_add(1, Ordering::Relaxed);
+            Json(SearchResponse {
+                items: Some(state.volumes.as_ref().clone()),
+                total_items: state.volumes.len() as i32,
+                kind: String::new(),
+            })
+        }
+
+        let requested_results = 8usize;
+        let volumes: Vec<_> = (0..requested_results)
+            .map(|i| make_volume(&format!("genre-vol-{i}")))
+            .collect();
+        let volumes_arc = Arc::new(volumes.clone());
+        let request_count = Arc::new(AtomicUsize::new(0));
+
+        let state = TestState {
+            volumes: Arc::clone(&volumes_arc),
+            request_count: Arc::clone(&request_count),
+        };
+
+        let std_listener = TcpListener::bind("127.0.0.1:0")?;
+        let addr = std_listener.local_addr()?;
+        std_listener.set_nonblocking(true)?;
+        let listener = TokioTcpListener::from_std(std_listener)?;
+
+        let app = Router::new()
+            .route("/books/v1/volumes", get(handler))
+            .with_state(state);
+
+        let server_handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service()).await;
+        });
+
+        let mut cached_client = CachedGoogleBooksClient::new(None);
+        cached_client.client =
+            GoogleBooksClient::new_with_base_url(None, &format!("http://{}/books/v1/", addr));
+
+        let max_results = Some(requested_results as u32);
+
+        let first_call = cached_client
+            .search_by_genre("Fantasy", max_results)
+            .await?;
+        assert_eq!(first_call.len(), volumes.len());
+
+        let second_call = cached_client
+            .search_by_genre("Fantasy", max_results)
+            .await?;
+        assert_eq!(second_call.len(), volumes.len());
+
+        assert_eq!(
+            request_count.load(Ordering::Relaxed),
+            1,
+            "expected only one HTTP request thanks to caching",
+        );
+
+        let cache_key =
+            CachedGoogleBooksClient::generate_search_key("genre", "Fantasy", None, max_results);
+        let cached_entry = cached_client
+            .search_cache
+            .get(&cache_key)
+            .await
+            .expect("cached genre results missing");
+        assert_eq!(cached_entry.len(), volumes.len());
+
+        server_handle.abort();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn caches_publisher_search_results() -> Result<()> {
+        use axum::{extract::State, routing::get, Json, Router};
+        use std::net::TcpListener;
+        use tokio::net::TcpListener as TokioTcpListener;
+
+        #[derive(Clone)]
+        struct TestState {
+            volumes: Arc<Vec<Volume>>,
+            request_count: Arc<AtomicUsize>,
+        }
+
+        async fn handler(State(state): State<TestState>) -> Json<SearchResponse> {
+            state.request_count.fetch_add(1, Ordering::Relaxed);
+            Json(SearchResponse {
+                items: Some(state.volumes.as_ref().clone()),
+                total_items: state.volumes.len() as i32,
+                kind: String::new(),
+            })
+        }
+
+        let requested_results = 6usize;
+        let volumes: Vec<_> = (0..requested_results)
+            .map(|i| make_volume(&format!("publisher-vol-{i}")))
+            .collect();
+        let volumes_arc = Arc::new(volumes.clone());
+        let request_count = Arc::new(AtomicUsize::new(0));
+
+        let state = TestState {
+            volumes: Arc::clone(&volumes_arc),
+            request_count: Arc::clone(&request_count),
+        };
+
+        let std_listener = TcpListener::bind("127.0.0.1:0")?;
+        let addr = std_listener.local_addr()?;
+        std_listener.set_nonblocking(true)?;
+        let listener = TokioTcpListener::from_std(std_listener)?;
+
+        let app = Router::new()
+            .route("/books/v1/volumes", get(handler))
+            .with_state(state);
+
+        let server_handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app.into_make_service()).await;
+        });
+
+        let mut cached_client = CachedGoogleBooksClient::new(None);
+        cached_client.client =
+            GoogleBooksClient::new_with_base_url(None, &format!("http://{}/books/v1/", addr));
+
+        let max_results = Some(requested_results as u32);
+
+        let first_call = cached_client
+            .search_by_publisher("Test Publisher", max_results)
+            .await?;
+        assert_eq!(first_call.len(), volumes.len());
+
+        let second_call = cached_client
+            .search_by_publisher("Test Publisher", max_results)
+            .await?;
+        assert_eq!(second_call.len(), volumes.len());
+
+        assert_eq!(
+            request_count.load(Ordering::Relaxed),
+            1,
+            "expected only one HTTP request thanks to caching",
+        );
+
+        let cache_key = CachedGoogleBooksClient::generate_search_key(
+            "publisher",
+            "Test Publisher",
+            None,
+            max_results,
+        );
+        let cached_entry = cached_client
+            .search_cache
+            .get(&cache_key)
+            .await
+            .expect("cached publisher results missing");
         assert_eq!(cached_entry.len(), volumes.len());
 
         server_handle.abort();

@@ -6,8 +6,7 @@ use crate::maturity_check::{
 use crate::types::{Context, Error, QueryMode};
 use crate::util::{detect_query_mode, normalize_isbn, truncate_on_char_boundary};
 use poise::serenity_prelude as serenity;
-use poise::serenity_prelude::{CreateActionRow, CreateButton, CreateEmbed};
-use std::time::Duration;
+use poise::serenity_prelude::CreateEmbed;
 
 fn build_book_embed(
     book: &Volume,
@@ -161,11 +160,10 @@ pub async fn book(
                         return Ok(());
                     }
 
-                    let (status_display, favorites_count) =
-                        if let Some(gid) = guild_id {
-                            let volume_id = &book.id;
-                            let status = sqlx::query!(
-                                r#"
+                    let (status_display, favorites_count) = if let Some(gid) = guild_id {
+                        let volume_id = &book.id;
+                        let status = sqlx::query!(
+                            r#"
                             SELECT
                                 CASE
                                     WHEN EXISTS (
@@ -194,31 +192,33 @@ pub async fn book(
                                 ) as "average_rating?"
                             FROM (SELECT $1::TEXT as volume_id) v
                         "#,
-                                volume_id,
-                                gid.get() as i64
-                            )
-                            .fetch_one(pool)
-                            .await?;
+                            volume_id,
+                            gid.get() as i64
+                        )
+                        .fetch_one(pool)
+                        .await?;
 
-                            let average_rating = status.average_rating;
-                            let mut status_value =
-                                status.status.unwrap_or_else(|| "Unknown".to_string());
-                            if status_value == "Completed" {
-                                if let Some(avg) = average_rating {
-                                    status_value = format!("Completed — {:.1}/5 rating", avg);
-                                }
+                        let average_rating = status.average_rating;
+                        let mut status_value =
+                            status.status.unwrap_or_else(|| "Unknown".to_string());
+                        if status_value == "Completed" {
+                            if let Some(avg) = average_rating {
+                                status_value = format!("Completed — {:.1}/5 rating", avg);
                             }
+                        }
 
-                            let favorites = sqlx::query!(
+                        let favorites = sqlx::query!(
                             "SELECT COUNT(*) as count FROM get_book_favorites_in_server($1, $2)",
                             volume_id,
                             gid.get() as i64
-                        ).fetch_one(pool).await?;
+                        )
+                        .fetch_one(pool)
+                        .await?;
 
-                            (Some(status_value), favorites.count.unwrap_or(0))
-                        } else {
-                            (None, 0)
-                        };
+                        (Some(status_value), favorites.count.unwrap_or(0))
+                    } else {
+                        (None, 0)
+                    };
 
                     let embed = build_book_embed(
                         &book,
@@ -331,196 +331,6 @@ pub async fn book(
             }
 
             ctx.send(poise::CreateReply::default().embed(embed)).await?;
-        }
-    }
-
-    Ok(())
-}
-
-#[poise::command(
-    slash_command,
-    description_localized("en-US", "Search for books by an author"),
-    user_cooldown = 5
-)]
-pub async fn author(
-    ctx: Context<'_>,
-    #[description = "The author to search for"] author: String,
-) -> Result<(), Error> {
-    ctx.defer().await?;
-
-    // Single API call: fetch up to 40 results once; paginate locally
-    let google_books = &ctx.data().google_books;
-    let books = google_books.search_by_author(&author, Some(40)).await?;
-
-    if books.is_empty() {
-        ctx.say("No books found by that author.").await?;
-        return Ok(());
-    }
-
-    let page_size: usize = 5;
-    let total = books.len();
-    let total_pages = ((total + page_size - 1) / page_size).max(1);
-    let mut page: usize = 0;
-
-    // Build an embed for a given page (0-based)
-    let make_embed = |page: usize| {
-        let start = page * page_size;
-        let end = (start + page_size).min(total);
-
-        let total_display = if total == 40 {
-            "40+".to_string()
-        } else {
-            total.to_string()
-        };
-
-        let mut e = CreateEmbed::default()
-            .title(format!("Books by {}", author))
-            .description(format!("Found {} books", total_display))
-            .color(0xB76E79);
-
-        for (i, book) in books[start..end].iter().enumerate() {
-            let cats = book.get_categories();
-            let categories = if cats.is_empty() {
-                "Categories: —".to_string()
-            } else {
-                format!("Categories: {}", cats.join(", "))
-            };
-            let info_link = book
-                .volume_info
-                .info_link
-                .clone()
-                .unwrap_or_else(|| format!("https://books.google.com/books?id={}", book.id));
-            let value = format!("{}\n[Google Books]({})", categories, info_link);
-            e = e.field(
-                format!("{}. {}", start + i + 1, book.get_title()),
-                value,
-                false,
-            );
-        }
-
-        if total > page_size {
-            e = e.footer(serenity::CreateEmbedFooter::new(format!(
-                "Page {} / {} • showing {}–{} of {} • Powered by Google Books API",
-                page + 1,
-                total_pages,
-                start + 1,
-                end,
-                total_display
-            )));
-        } else {
-            e = e.footer(serenity::CreateEmbedFooter::new(
-                "Powered by Google Books API",
-            ));
-        }
-
-        e
-    };
-
-    // Component row with nav buttons; disable as appropriate
-    let make_components = |page: usize| {
-        let at_start = page == 0;
-        let at_end = page + 1 >= total_pages;
-
-        vec![CreateActionRow::Buttons(vec![
-            CreateButton::new("first")
-                .label("⮎ First")
-                .style(serenity::ButtonStyle::Secondary)
-                .disabled(at_start),
-            CreateButton::new("prev")
-                .label("◀ Prev")
-                .style(serenity::ButtonStyle::Secondary)
-                .disabled(at_start),
-            CreateButton::new("page")
-                .label(format!("Page {}/{}", page + 1, total_pages))
-                .disabled(true),
-            CreateButton::new("next")
-                .label("Next ▶")
-                .style(serenity::ButtonStyle::Secondary)
-                .disabled(at_end),
-            CreateButton::new("last")
-                .label("Last ⮏")
-                .style(serenity::ButtonStyle::Secondary)
-                .disabled(at_end),
-        ])]
-    };
-
-    // Send first page; add buttons only if we have multiple pages
-    let reply = poise::CreateReply::default()
-        .embed(make_embed(page))
-        .components(if total_pages > 1 {
-            make_components(page)
-        } else {
-            vec![]
-        });
-
-    let mut msg = ctx.send(reply).await?.into_message().await?;
-
-    if total_pages == 1 {
-        return Ok(());
-    }
-
-    // Use resettable timeout (resets on each interaction)
-    loop {
-        let collector = msg
-            .await_component_interactions(ctx.serenity_context())
-            .author_id(ctx.author().id)
-            .timeout(Duration::from_secs(120));
-
-        match collector.next().await {
-            Some(mci) => {
-                match mci.data.custom_id.as_str() {
-                    "first" => page = 0,
-                    "prev" => {
-                        if page > 0 {
-                            page -= 1;
-                        }
-                    }
-                    "next" => {
-                        if page + 1 < total_pages {
-                            page += 1;
-                        }
-                    }
-                    "last" => page = total_pages.saturating_sub(1),
-                    _ => {}
-                }
-
-                // Update in-place
-                mci.create_response(
-                    ctx.serenity_context(),
-                    serenity::CreateInteractionResponse::UpdateMessage(
-                        serenity::CreateInteractionResponseMessage::default()
-                            .embed(make_embed(page))
-                            .components(make_components(page)),
-                    ),
-                )
-                .await
-                .ok();
-            }
-            None => {
-                // Timed out: disable all buttons
-                msg.edit(
-                    ctx.serenity_context(),
-                    serenity::EditMessage::default()
-                        .embed(make_embed(page))
-                        .components(
-                            make_components(page)
-                                .into_iter()
-                                .map(|mut row| {
-                                    // Disable all buttons in the row
-                                    if let CreateActionRow::Buttons(ref mut buttons) = row {
-                                        for button in buttons {
-                                            *button = button.clone().disabled(true);
-                                        }
-                                    }
-                                    row
-                                })
-                                .collect(),
-                        ),
-                )
-                .await
-                .ok();
-                break;
-            }
         }
     }
 

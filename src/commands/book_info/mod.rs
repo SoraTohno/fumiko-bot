@@ -8,5 +8,5 @@ use crate::{types::Data, types::Error};
 type CommandVec = Vec<poise::Command<Data, Error>>;
 
 pub fn book_info_commands() -> CommandVec {
-    vec![info::book(), info::author(), botinfo::botinfo()]
+    vec![info::book(), botinfo::botinfo()]
 }

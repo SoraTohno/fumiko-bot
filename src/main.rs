@@ -13,7 +13,7 @@ mod selection_poll_handler;
 
 use dotenvy;
 use google_books_cache::CachedGoogleBooksClient;
-use poise::serenity_prelude as serenity;
+use poise::{serenity_prelude as serenity, CreateReply, FrameworkError};
 use sqlx::postgres::PgPoolOptions;
 use std::{collections::HashSet, env, sync::Arc};
 use tokio::{self, sync::RwLock};
@@ -63,6 +63,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             event_handler: |ctx, event, framework, data| {
                 Box::pin(poll_handler::handle_event(ctx, event, framework, data))
             },
+            on_error: |error| {
+                Box::pin(async move {
+                    match error {
+                        FrameworkError::MissingUserPermissions {
+                            ctx,
+                            missing_permissions,
+                            ..
+                        } if missing_permissions.is_none() => {
+                            let response = "I couldn't verify your permissions in this channel. Please run this command somewhere I can read or give me access here.";
+
+                            if let Err(err) = ctx
+                                .send(CreateReply::default().content(response).ephemeral(true))
+                                .await
+                            {
+                                eprintln!(
+                                    "Error sending missing permissions explanation: {err}"
+                                );
+                            }
+                        }
+                        other => {
+                            if let Err(err) = poise::builtins::on_error(other).await {
+                                eprintln!(
+                                    "Error while handling framework error with default handler: {err}"
+                                );
+                            }
+                        }
+                    }
+                })
+            },
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
@@ -78,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     database.clone(),
                     google_books.clone(),
                 );
-                
+
                 selection_poll_handler::spawn_selection_poll_watcher(
                     ctx.http.clone(),
                     database.clone(),

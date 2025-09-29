@@ -115,8 +115,17 @@ pub async fn handle_event(
     data: &Data,
 ) -> Result<(), Error> {
     match event {
-        serenity::FullEvent::GuildCreate { guild, .. } => {
+        serenity::FullEvent::GuildCreate { guild, is_new } => {
             data.guild_cache.write().await.insert(guild.id);
+
+            if is_new.unwrap_or(false) {
+                if let Err(err) = send_welcome_message(ctx, guild).await {
+                    eprintln!(
+                        "Failed to send welcome message to guild {}: {err}",
+                        guild.id
+                    );
+                }
+            }
         }
 
         serenity::FullEvent::GuildDelete { incomplete, full } => {
@@ -188,6 +197,59 @@ pub async fn handle_event(
         }
 
         _ => {}
+    }
+
+    Ok(())
+}
+
+fn select_welcome_channel(guild: &serenity::Guild) -> Option<serenity::ChannelId> {
+    if let Some(channel_id) = guild.system_channel_id {
+        return Some(channel_id);
+    }
+
+    guild
+        .channels
+        .values()
+        .filter(|channel| {
+            matches!(
+                channel.kind,
+                serenity::ChannelType::Text | serenity::ChannelType::News
+            )
+        })
+        .min_by_key(|channel| channel.position)
+        .map(|channel| channel.id)
+}
+
+async fn send_welcome_message(
+    ctx: &serenity::Context,
+    guild: &serenity::Guild,
+) -> Result<(), serenity::Error> {
+    let Some(channel_id) = select_welcome_channel(guild) else {
+        return Ok(());
+    };
+
+    let embed = serenity::CreateEmbed::default()
+        .title("Thank you for inviting Fumiko!")
+        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like the announcement channel and pinning/mature content configuration.\n\nVisit [fumiko.dev](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nHappy Reading!")
+        .color(0xB76E79);
+
+    let message = serenity::CreateMessage::new().embed(embed);
+
+    if let Err(err) = channel_id.send_message(&ctx.http, message).await {
+        eprintln!(
+            "Failed to send welcome embed to guild {} in channel {}: {err}",
+            guild.id, channel_id
+        );
+
+        // Retry without the embed if embeds are disallowed.
+        channel_id
+            .send_message(
+                &ctx.http,
+                serenity::CreateMessage::new().content(
+                    "Thanks for inviting Fumiko! Run `/setup` and `/config` to get started. Learn more at https://fumiko.dev.",
+                ),
+            )
+            .await?;
     }
 
     Ok(())

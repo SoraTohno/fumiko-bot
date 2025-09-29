@@ -1,9 +1,68 @@
 use crate::util::truncate_on_char_boundary;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
 const GOOGLE_BOOKS_API_BASE: &str = "https://www.googleapis.com/books/v1";
+
+pub fn build_search_query(
+    query: Option<&str>,
+    author: Option<&str>,
+    genre: Option<&str>,
+    publisher: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if let Some(q) = query.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }) {
+        parts.push(q.to_string());
+    }
+
+    if let Some(a) = author.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }) {
+        parts.push(format!("inauthor:{a}"));
+    }
+
+    if let Some(g) = genre.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }) {
+        parts.push(format!("subject:{g}"));
+    }
+
+    if let Some(p) = publisher.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }) {
+        parts.push(format!("inpublisher:{p}"));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GoogleBooksClient {
@@ -22,6 +81,47 @@ impl GoogleBooksClient {
             api_key,
             base_url,
         }
+    }
+
+    pub async fn search(
+        &self,
+        query: Option<&str>,
+        author: Option<&str>,
+        genre: Option<&str>,
+        publisher: Option<&str>,
+        max_results: Option<u32>,
+    ) -> Result<Vec<Volume>> {
+        let Some(q) = build_search_query(query, author, genre, publisher) else {
+            return Ok(vec![]);
+        };
+
+        let mut url = self.base_url.join("volumes")?;
+        {
+            let mut qp = url.query_pairs_mut();
+            qp.append_pair("q", &q);
+            qp.append_pair("maxResults", &max_results.unwrap_or(10).min(40).to_string());
+            if let Some(key) = &self.api_key {
+                qp.append_pair("key", key);
+            }
+        }
+
+        let body = self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let parsed: SearchResponse = serde_json::from_str(&body).map_err(|e| {
+            anyhow!(
+                "Failed to decode Google Books JSON: {e}; body: {}",
+                truncate(&body, 900)
+            )
+        })?;
+
+        Ok(parsed.items.unwrap_or_default())
     }
 
     #[cfg(test)]
@@ -131,6 +231,76 @@ impl GoogleBooksClient {
         {
             let mut qp = url.query_pairs_mut();
             qp.append_pair("q", &format!("inauthor:{author}"));
+            qp.append_pair("maxResults", &max_results.unwrap_or(10).min(40).to_string());
+            if let Some(key) = &self.api_key {
+                qp.append_pair("key", key);
+            }
+        }
+
+        let body = self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let parsed: SearchResponse = serde_json::from_str(&body).map_err(|e| {
+            anyhow!(
+                "Failed to decode Google Books JSON: {e}; body: {}",
+                truncate(&body, 900)
+            )
+        })?;
+
+        Ok(parsed.items.unwrap_or_default())
+    }
+
+    // Search by genre/subject using the Google Books subject query.
+    pub async fn search_by_genre(
+        &self,
+        genre: &str,
+        max_results: Option<u32>,
+    ) -> Result<Vec<Volume>> {
+        let mut url = self.base_url.join("volumes")?;
+        {
+            let mut qp = url.query_pairs_mut();
+            qp.append_pair("q", &format!("subject:{genre}"));
+            qp.append_pair("maxResults", &max_results.unwrap_or(10).min(40).to_string());
+            if let Some(key) = &self.api_key {
+                qp.append_pair("key", key);
+            }
+        }
+
+        let body = self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let parsed: SearchResponse = serde_json::from_str(&body).map_err(|e| {
+            anyhow!(
+                "Failed to decode Google Books JSON: {e}; body: {}",
+                truncate(&body, 900)
+            )
+        })?;
+
+        Ok(parsed.items.unwrap_or_default())
+    }
+
+    // Search by publisher using the Google Books publisher query.
+    pub async fn search_by_publisher(
+        &self,
+        publisher: &str,
+        max_results: Option<u32>,
+    ) -> Result<Vec<Volume>> {
+        let mut url = self.base_url.join("volumes")?;
+        {
+            let mut qp = url.query_pairs_mut();
+            qp.append_pair("q", &format!("inpublisher:{publisher}"));
             qp.append_pair("maxResults", &max_results.unwrap_or(10).min(40).to_string());
             if let Some(key) = &self.api_key {
                 qp.append_pair("key", key);

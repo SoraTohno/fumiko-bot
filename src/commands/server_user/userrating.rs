@@ -34,7 +34,7 @@ struct UserRatingRow {
 )]
 pub async fn userrating(
     ctx: Context<'_>,
-    #[description = "User to show (defaults to you)"] user: Option<User>,
+    #[description = "User whose ratings to show"] user: User,
     #[description = "Optionally, filter to a specific title or ISBN"] title_or_isbn: Option<String>,
     #[description = "Optional author to disambiguate the title (used when title)"] author: Option<
         String,
@@ -53,7 +53,7 @@ pub async fn userrating(
         ctx.send(poise::CreateReply::default().embed(embed)).await?;
         return Ok(());
     };
-    let target_user = user.unwrap_or_else(|| ctx.author().clone());
+    let target_user = user;
     let sort = sort.unwrap_or(UserRatingSort::Rating);
 
     // If a query is provided, show this user's rating for that specific book
@@ -250,6 +250,18 @@ pub async fn userrating(
         }
     };
 
+    let (rating_total, rating_count) =
+        rows.iter()
+            .fold((0i32, 0usize), |acc, row| match row.rating {
+                Some(r) => (acc.0 + r, acc.1 + 1),
+                None => acc,
+            });
+    let average_rating = if rating_count > 0 {
+        Some(rating_total as f32 / rating_count as f32)
+    } else {
+        None
+    };
+
     if rows.is_empty() {
         let embed = CreateEmbed::default()
             .author(embed_author_with_icon(
@@ -294,7 +306,7 @@ pub async fn userrating(
     }
 
     if filtered_rows.is_empty() && mature_count > 0 {
-        let embed = CreateEmbed::default()
+        let mut embed = CreateEmbed::default()
             .author(embed_author_with_icon(
                 format!("{}'s Ratings", target_user.name),
                 Some(target_user.face()),
@@ -308,6 +320,19 @@ pub async fn userrating(
             ))
             .color(0xB76E79)
             .footer(CreateEmbedFooter::new("Content rating from Google Books API"));
+
+        if let Some(avg) = average_rating {
+            embed = embed.field(
+                "Average rating",
+                format!(
+                    "{avg:.2}/5 across {count} book{}",
+                    if rating_count == 1 { "" } else { "s" },
+                    count = rating_count
+                ),
+                false,
+            );
+        }
+
         ctx.send(poise::CreateReply::default().embed(embed)).await?;
         return Ok(());
     }
@@ -348,36 +373,53 @@ pub async fn userrating(
             ));
         }
 
+        let mut description_sections: Vec<String> = Vec::new();
+
+        if page == 0 {
+            if let Some(avg) = average_rating {
+                description_sections.push(format!(
+                    "**Average rating:** {avg:.2}/5 across {count} book{}",
+                    if rating_count == 1 { "" } else { "s" },
+                    count = rating_count
+                ));
+            }
+        }
+
+        if !list.is_empty() {
+            description_sections.push(list);
+        }
+
+        if mature_count > 0 && page == 0 {
+            let mut why: Vec<&str> = Vec::new();
+            if !is_nsfw {
+                why.push("blocked in non-NSFW channel");
+            }
+            if !maturity_enabled {
+                why.push("maturity disabled");
+            }
+            if why.is_empty() {
+                description_sections.push(format!("_({} mature books hidden)_", mature_count));
+            } else {
+                description_sections.push(format!(
+                    "_({} mature books hidden — {})_",
+                    mature_count,
+                    why.join(" & ")
+                ));
+            }
+        }
+
+        let description = description_sections.join("\n\n");
+
         let mut embed = CreateEmbed::default()
             .author(embed_author_with_icon(
                 format!("{}'s Ratings", target_user.name),
                 Some(target_user.face()),
             ))
-            .description(format!(
-                "{}{}",
-                list,
-                if mature_count > 0 && page == 0 {
-                    let mut why: Vec<&str> = Vec::new();
-                    if !is_nsfw {
-                        why.push("blocked in non-NSFW channel");
-                    }
-                    if !maturity_enabled {
-                        why.push("maturity disabled");
-                    }
-                    if why.is_empty() {
-                        format!("\n_({} mature books hidden)_", mature_count)
-                    } else {
-                        format!(
-                            "\n_({} mature books hidden — {})_",
-                            mature_count,
-                            why.join(" & ")
-                        )
-                    }
-                } else {
-                    String::new()
-                }
-            ))
             .color(0xB76E79);
+
+        if !description.is_empty() {
+            embed = embed.description(description);
+        }
 
         if total_pages > 1 {
             let label = match sort {

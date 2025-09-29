@@ -110,40 +110,8 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
 
     let bot_face = ctx.serenity_context().http.get_current_user().await?.face();
 
-    let mut dm_embed = CreateEmbed::default()
-        .author(embed_author_with_icon(
-            "Fumiko Book Club Bot Commands",
-            Some(bot_face),
-        ))
-        .description(
-            "Here's everything I can do. Commands with subcommands list every available option.",
-        )
-        .color(0xB76E79)
-        .footer(CreateEmbedFooter::new(
-            "Use /help anytime to see this list again. • https://fumiko.dev",
-        ));
-
-    for (name, value) in &sections {
-        dm_embed = dm_embed.field(name.clone(), value.clone(), false);
-    }
-
-    let dm_result = ctx
-        .author()
-        .dm(
-            &ctx.serenity_context(),
-            CreateMessage::new().embed(dm_embed),
-        )
-        .await;
-
-    match dm_result {
-        Ok(_) => {
-            let embed = CreateEmbed::default()
-                .title("✅ Help sent")
-                .description("Check your DMs for the full list of commands.")
-                .color(0xB76E79);
-            ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
-                .await?;
-        }
+    let dm_channel = match ctx.author().create_dm_channel(&ctx.http()).await {
+        Ok(channel) => channel,
         Err(_) => {
             let embed = CreateEmbed::default()
                 .title("❌ Couldn't send DM")
@@ -153,8 +121,85 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
                 .color(0xB76E79);
             ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
                 .await?;
+            return Ok(());
+        }
+    };
+
+    const MAX_FIELDS_PER_PAGE: usize = 25;
+    const MAX_EMBED_CHARS: usize = 5_000;
+
+    let mut pages: Vec<Vec<(String, String)>> = Vec::new();
+    let mut current_page: Vec<(String, String)> = Vec::new();
+    let mut current_length = 0usize;
+
+    for (name, value) in sections.into_iter() {
+        let entry_length = name.len() + value.len();
+
+        if !current_page.is_empty()
+            && (current_page.len() >= MAX_FIELDS_PER_PAGE
+                || current_length + entry_length > MAX_EMBED_CHARS)
+        {
+            pages.push(current_page);
+            current_page = Vec::new();
+            current_length = 0;
+        }
+
+        current_length += entry_length;
+        current_page.push((name, value));
+    }
+
+    if !current_page.is_empty() {
+        pages.push(current_page);
+    }
+
+    let page_count = pages.len();
+
+    for (page_index, chunk) in pages.into_iter().enumerate() {
+        let mut dm_embed = CreateEmbed::default()
+            .author(embed_author_with_icon(
+                "Fumiko Book Club Bot Commands",
+                Some(bot_face.clone()),
+            ))
+            .description(
+                "Here's everything I can do. Commands with subcommands list every available option.",
+            )
+            .color(0xB76E79)
+            .footer(CreateEmbedFooter::new(if page_count > 1 {
+                format!(
+                    "Use /help anytime to see this list again. • https://fumiko.dev • Page {} of {}",
+                    page_index + 1,
+                    page_count
+                )
+            } else {
+                "Use /help anytime to see this list again. • https://fumiko.dev".to_string()
+            }));
+
+        for (name, value) in chunk {
+            dm_embed = dm_embed.field(name, value, false);
+        }
+
+        if let Err(err) = dm_channel
+            .send_message(&ctx.http(), CreateMessage::new().embed(dm_embed))
+            .await
+        {
+            let embed = CreateEmbed::default()
+                .title("❌ Couldn't send DM")
+                .description(format!(
+                    "I couldn't send you a DM. Please make sure your DMs are open and try again. ({err})",
+                ))
+                .color(0xB76E79);
+            ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
+                .await?;
+            return Ok(());
         }
     }
+
+    let embed = CreateEmbed::default()
+        .title("✅ Help sent")
+        .description("Check your DMs for the full list of commands.")
+        .color(0xB76E79);
+    ctx.send(poise::CreateReply::default().embed(embed).ephemeral(true))
+        .await?;
 
     Ok(())
 }
