@@ -33,7 +33,7 @@ A Rust-powered Discord bot that organizes server-based book clubs, integrates wi
 
 ### Command surface area
 The bot exposes a wide set of slash commands grouped by audience:
-- **Book discovery** (`/info`, `/search`, `/isbn`, etc.) pull from Google Books and render rich embeds.
+- **Book discovery** (`/info`, `/explore`, `/isbn`, etc.) pull from Google Books and render rich embeds.
 - **Server administration** commands (`/config`, `/adminqueue`, `/select`, `/mature`, …) control queue policies, configure announcement targets, and manage selection polls.
 - **Server member features** (`/queue`, `/clubread`, `/clubrating`, `/stats`) help members track the active book, rate finished titles, and view queue state.
 - **Personal tracking** (`/progress`, `/readinglist`, `/favorite`, `/numberone`) let individuals maintain their own backlog without leaving Discord.
