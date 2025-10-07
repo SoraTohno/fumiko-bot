@@ -45,39 +45,26 @@ The bot exposes a wide set of slash commands grouped by audience:
 - Rust 1.80+ (edition 2024)
 - PostgreSQL 14+
 - A Discord bot token and application configured for the "Message Content" and "Polls" privileged intents
-- (Optional) Google Books API key for higher quota limits
+- Google Books API key
 
 ### Environment
 Create a `.env` file with at least:
 ```env
 DISCORD_TOKEN=your_bot_token
 DATABASE_URL=postgres://user:password@localhost/book_club
-# Optional:
 GOOGLE_BOOKS_API_KEY=your_api_key
 ```
 
 ### Database setup
 1. Create the target database.
 2. Apply [`schema.sql`](schema.sql) using `psql` or your migration tool of choice.
-3. Ensure the database user can manage extensions required by SQLx (e.g., `pgcrypto` if you add future migrations).
+3. Ensure the database user can manage extensions required by SQLx
 
 ### Running the bot locally
-```bash
-cargo run
-```
-The process starts the Serenity gateway, registers slash commands globally, launches background watchers, and begins logging cache statistics every five minutes.
+Visit [https://discord.com/developers/docs/quick-start/getting-started](https://discord.com/developers/docs/quick-start/getting-started) for a guide on how to setup a discord bot. It can be ran locally with tools like ngrok or with a cloud provider via something like AWS Lightsail.
 
 ### Tests
 Unit tests focus on Google Books caching semantics and can be run with:
 ```bash
 cargo test
 ```
-
-## Hosting considerations
-The bot is a single binary that depends on Discord's gateway connection plus Postgres. In production you should:
-- Run it on a long-lived Tokio-friendly host (Linux container or VM).
-- Keep `.env` secrets in your orchestrator's secret manager.
-- Monitor logs for cache stats and poll watcher errors; structured logging can be added by swapping the `println!` calls for a tracing subscriber.
-- Back up the Postgres database regularly—stateful data drives almost every command.
-
-Because slash commands are registered globally, give Discord up to an hour to propagate changes when deploying new builds.
