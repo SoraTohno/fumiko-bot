@@ -19,8 +19,8 @@ pub async fn botinfo(ctx: Context<'_>) -> Result<(), Error> {
                  • Reading progress tracking\n\
                  • Track reading history and rankings\n\
                  • Personal reading lists and favorites\n\n\
-                 Book data is provided by the Google Books API.\n\n\
-                 If you encounter any issues, please report them us via [fumiko.dev/contact](https://fumiko.dev/contact)."
+                 Check out Fumiko on [top.gg](https://top.gg/bot/1383525299983089815)! (Votes appreciated <3)\n\n\
+                 If you encounter any issues, please report them to us via [fumiko.dev/contact](https://fumiko.dev/contact)."
             )
             .field("Commands", "Please go to [fumiko.dev/commands](https://fumiko.dev/commands) or use `/help` to see all available commands", false)
             .field(

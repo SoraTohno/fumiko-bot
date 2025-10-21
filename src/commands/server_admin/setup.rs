@@ -36,7 +36,7 @@ pub async fn setup(ctx: Context<'_>) -> Result<(), Error> {
         .description("Here's a quick reference for the configuration commands available:")
         .field(
             "Announcements",
-            "• `/config announcement set <channel>` — choose where book announcements and polls go.\n• `/config announcement clear` — remove the configured announcement channel.",
+            "• `/config announcement set <channel>` — choose where book announcements and polls go.\n• `/config announcement clear` — remove the configured announcement channel.\n• Please make sure that Fumiko has the necessary permissions to view and send messages in your announcement channel!",
             false,
         )
         .field(

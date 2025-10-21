@@ -113,7 +113,7 @@ async fn set(
     let embed = CreateEmbed::default()
         .title("✅ Announcement Channel Set")
         .description(format!(
-            "I'll share book announcements in {} from now on.",
+            "I'll share book announcements in {} from now on.\n\nPlease make sure that Fumiko has the necessary permissions to view the channel you have set and send messages in it!",
             channel_id.mention()
         ))
         .color(0xB76E79)
@@ -226,7 +226,7 @@ async fn status(ctx: Context<'_>) -> Result<(), Error> {
         CreateEmbed::default()
             .title("Announcement Channel Configured")
             .description(format!(
-                "Announcements are currently sent to {}. Use `/config announcement clear` to remove it.",
+                "Announcements are currently sent to {}. Use `/config announcement clear` to remove it. Make sure Fumiko has permissions to view this channel and send messages in it!",
                 channel_id.mention()
             ))
             .color(0xB76E79)

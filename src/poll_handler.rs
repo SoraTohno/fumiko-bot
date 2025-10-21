@@ -202,9 +202,41 @@ pub async fn handle_event(
     Ok(())
 }
 
-fn select_welcome_channel(guild: &serenity::Guild) -> Option<serenity::ChannelId> {
+fn fetch_bot_member(ctx: &serenity::Context, guild: &serenity::Guild) -> Option<serenity::Member> {
+    let bot_user_id = {
+        let current_user = ctx.cache.current_user();
+        current_user.id
+    };
+
+    guild.members.get(&bot_user_id).cloned().or_else(|| {
+        ctx.cache
+            .guild(guild.id)
+            .and_then(|cached_guild| cached_guild.members.get(&bot_user_id).cloned())
+    })
+}
+
+fn select_welcome_channel(
+    ctx: &serenity::Context,
+    guild: &serenity::Guild,
+) -> Option<serenity::ChannelId> {
+    let bot_member = fetch_bot_member(ctx, guild)?;
+
+    let channel_has_send_permissions = |channel: &serenity::GuildChannel| {
+    let perms = guild.user_permissions_in(channel, &bot_member);
+    perms.contains(serenity::Permissions::VIEW_CHANNEL) 
+        && perms.contains(serenity::Permissions::SEND_MESSAGES)
+    };
+
     if let Some(channel_id) = guild.system_channel_id {
-        return Some(channel_id);
+        if let Some(channel) = guild.channels.get(&channel_id) {
+            if matches!(
+                channel.kind,
+                serenity::ChannelType::Text | serenity::ChannelType::News
+            ) && channel_has_send_permissions(channel)
+            {
+                return Some(channel_id);
+            }
+        }
     }
 
     guild
@@ -214,7 +246,7 @@ fn select_welcome_channel(guild: &serenity::Guild) -> Option<serenity::ChannelId
             matches!(
                 channel.kind,
                 serenity::ChannelType::Text | serenity::ChannelType::News
-            )
+            ) && channel_has_send_permissions(channel)
         })
         .min_by_key(|channel| channel.position)
         .map(|channel| channel.id)
@@ -224,24 +256,49 @@ async fn send_welcome_message(
     ctx: &serenity::Context,
     guild: &serenity::Guild,
 ) -> Result<(), serenity::Error> {
-    let Some(channel_id) = select_welcome_channel(guild) else {
+    let Some(channel_id) = select_welcome_channel(ctx, guild) else {
         return Ok(());
     };
 
+    let Some(channel) = guild.channels.get(&channel_id) else {
+        return Ok(());
+    };
+
+    let Some(bot_member) = fetch_bot_member(ctx, guild) else {
+        eprintln!(
+            "Failed to locate bot member when sending welcome message in guild {}",
+            guild.id
+        );
+        return Ok(());
+    };
+
+    let permissions = guild.user_permissions_in(channel, &bot_member);
+
     let embed = serenity::CreateEmbed::default()
         .title("Thank you for inviting Fumiko!")
-        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like the announcement channel and pinning/mature content configuration.\n\nVisit [fumiko.dev/commands](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nYou can visit [fumiko.dev/guide](https://fumiko.dev/guide) for a quick explanation on how to use Fumiko bot.\n\nHappy Reading!")
+        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like Fumiko's announcement channel and mature content configuration.\n\n**Important:** Please make sure that Fumiko has the necessary permissions to view and send messages in any channels you intend for Fumiko to be used in!\n\nVisit [fumiko.dev/commands](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nYou can visit [fumiko.dev/guide](https://fumiko.dev/guide) for a quick explanation on how to use Fumiko bot.\n\nHappy Reading!")
         .color(0xB76E79);
 
     let message = serenity::CreateMessage::new().embed(embed);
 
-    if let Err(err) = channel_id.send_message(&ctx.http, message).await {
-        eprintln!(
-            "Failed to send welcome embed to guild {} in channel {}: {err}",
-            guild.id, channel_id
-        );
+    if permissions.contains(serenity::Permissions::EMBED_LINKS) {
+        if let Err(err) = channel_id.send_message(&ctx.http, message).await {
+            eprintln!(
+                "Failed to send welcome embed to guild {} in channel {}: {err}",
+                guild.id, channel_id
+            );
 
-        // Retry without the embed if embeds are disallowed.
+            // Retry without the embed if embeds are disallowed or another error occurred.
+            channel_id
+                .send_message(
+                    &ctx.http,
+                    serenity::CreateMessage::new().content(
+                        "Thanks for inviting Fumiko! Run `/setup` and `/config` to get started. Learn more at https://fumiko.dev.",
+                    ),
+                )
+                .await?;
+        }
+    } else if permissions.contains(serenity::Permissions::SEND_MESSAGES) {
         channel_id
             .send_message(
                 &ctx.http,
@@ -250,6 +307,11 @@ async fn send_welcome_message(
                 ),
             )
             .await?;
+    } else {
+        eprintln!(
+            "No accessible channel found for welcome message in guild {}",
+            guild.id
+        );
     }
 
     Ok(())

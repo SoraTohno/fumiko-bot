@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             missing_permissions,
                             ..
                         } if missing_permissions.is_none() => {
-                            let response = "I couldn't verify your permissions in this channel. Please run this command somewhere I can read or give me access here.";
+                            let response = "I couldn't verify your permissions in this channel. Please run this command somewhere I can read or give me access to view this channel.";
 
                             if let Err(err) = ctx
                                 .send(CreateReply::default().content(response).ephemeral(true))
