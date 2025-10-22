@@ -3,7 +3,10 @@ use crate::maturity_check::{
     server_maturity_enabled,
 };
 use crate::types::QueryMode;
-use crate::util::{detect_query_mode, embed_author_with_icon, get_guild_name, normalize_isbn};
+use crate::util::{
+    detect_query_mode, embed_author_with_icon, get_guild_name, log_error_with_source,
+    normalize_isbn,
+};
 use crate::*;
 use crate::{types::Context, types::Error};
 use poise::serenity_prelude::{CreateEmbed, CreateEmbedFooter, User};
@@ -359,7 +362,7 @@ async fn add(
             }
         }
         Err(e) => {
-            eprintln!("Error adding to reading list: {}", e);
+            log_error_with_source("Error adding to reading list", &e);
             let embed = CreateEmbed::default()
                 .title("❌ Error")
                 .description("An error occurred while adding the book to your reading list.")

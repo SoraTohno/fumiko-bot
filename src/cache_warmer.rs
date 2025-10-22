@@ -1,10 +1,11 @@
 use crate::google_books_cache::CachedGoogleBooksClient;
+use crate::util::{log_cache_stat, log_error_with_source};
 use sqlx::PgPool;
 use std::collections::HashSet;
 
 /// Pre-warm the cache with frequently accessed books
 pub async fn warm_cache(pool: &PgPool, google_books: &CachedGoogleBooksClient) {
-    println!("🔥 Starting cache pre-warming...");
+    log_cache_stat("🔥 Starting cache pre-warming...");
 
     let mut volume_ids = HashSet::new();
 
@@ -75,7 +76,7 @@ pub async fn warm_cache(pool: &PgPool, google_books: &CachedGoogleBooksClient) {
                 Ok(_) => success += 1,
                 Err(e) => {
                     errors += 1;
-                    eprintln!("Failed to pre-warm volume: {}", e);
+                    log_error_with_source("Failed to pre-warm volume", &e);
                 }
             }
         }
@@ -86,10 +87,9 @@ pub async fn warm_cache(pool: &PgPool, google_books: &CachedGoogleBooksClient) {
         }
     }
 
-    println!(
-        "✅ Cache pre-warming complete: {}/{} volumes cached ({} errors)",
-        success, total, errors
-    );
+    log_cache_stat(format!(
+        "✅ Cache pre-warming complete: {success}/{total} volumes cached ({errors} errors)"
+    ));
 }
 
 /// Periodically refresh cache for active books

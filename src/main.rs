@@ -7,13 +7,13 @@ mod google_books;
 mod google_books_cache;
 mod maturity_check;
 mod poll_handler;
+mod selection_poll_handler;
 mod types;
 mod util;
-mod selection_poll_handler;
 
 use dotenvy;
 use google_books_cache::CachedGoogleBooksClient;
-use poise::{serenity_prelude as serenity, CreateReply, FrameworkError};
+use poise::{CreateReply, FrameworkError, serenity_prelude as serenity};
 use sqlx::postgres::PgPoolOptions;
 use std::{collections::HashSet, env, sync::Arc};
 use tokio::{self, sync::RwLock};
@@ -77,15 +77,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .send(CreateReply::default().content(response).ephemeral(true))
                                 .await
                             {
-                                eprintln!(
-                                    "Error sending missing permissions explanation: {err}"
+                                log_error_with_source(
+                                    "Error sending missing permissions explanation",
+                                    &err,
                                 );
                             }
                         }
                         other => {
                             if let Err(err) = poise::builtins::on_error(other).await {
-                                eprintln!(
-                                    "Error while handling framework error with default handler: {err}"
+                                log_error_with_source(
+                                    "Error while handling framework error with default handler",
+                                    &err,
                                 );
                             }
                         }
@@ -97,7 +99,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                println!("🚀 Bot is ready with Google Books caching enabled!");
                 let guild_cache = Arc::new(RwLock::new(
                     ctx.cache.guilds().into_iter().collect::<HashSet<_>>(),
                 ));

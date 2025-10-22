@@ -1,4 +1,3 @@
-// src/google_books_cache.rs
 use anyhow::{Context, Result};
 use moka::future::Cache;
 use sha2::{Digest, Sha256};
@@ -6,8 +5,8 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::google_books::{build_search_query, GoogleBooksClient, Volume};
-use crate::util::truncate_on_char_boundary;
+use crate::google_books::{GoogleBooksClient, Volume, build_search_query};
+use crate::util::{log_cache_stat, log_error_with_source, truncate_on_char_boundary};
 
 /// Cache configuration constants
 const VOLUME_CACHE_TTL_DAYS: u64 = 7; // 7 days for individual volumes
@@ -54,21 +53,21 @@ impl CacheStats {
 
         if search_total > 0 {
             let search_hit_rate = (search_hits as f64 / search_total as f64) * 100.0;
-            println!(
-                "📊 Cache Stats - Search: {:.1}% hit rate ({}/{} hits)",
-                search_hit_rate, search_hits, search_total
-            );
+            log_cache_stat(format!(
+                "📊 Cache Stats - Search: {:.1}% hit rate ({search_hits}/{search_total} hits)",
+                search_hit_rate
+            ));
         }
 
         if volume_total > 0 {
             let volume_hit_rate = (volume_hits as f64 / volume_total as f64) * 100.0;
-            println!(
-                "📊 Cache Stats - Volume: {:.1}% hit rate ({}/{} hits)",
-                volume_hit_rate, volume_hits, volume_total
-            );
+            log_cache_stat(format!(
+                "📊 Cache Stats - Volume: {:.1}% hit rate ({volume_hits}/{volume_total} hits)",
+                volume_hit_rate
+            ));
         }
 
-        println!("📊 Total Google Books API calls: {}", api_calls);
+        log_cache_stat(format!("📊 Total Google Books API calls: {api_calls}"));
     }
 }
 
@@ -497,7 +496,7 @@ impl CachedGoogleBooksClient {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let volume = self.client.get_volume(volume_id).await.map_err(|err| {
-            eprintln!("Error fetching Google Books volume {}: {err:?}", volume_id);
+            log_error_with_source("Error fetching Google Books volume", &err);
             err.context(format!(
                 "Google Books volume fetch failed for ID {volume_id}"
             ))
@@ -579,13 +578,11 @@ impl CachedGoogleBooksClient {
         let search_weight = self.search_cache.weighted_size();
         let volume_weight = self.volume_cache.weighted_size();
 
-        println!(
-            "📚 Cache sizes - Search: {} entries (~{:.2} MB), Volume: {} entries (~{:.2} MB)",
-            search_size,
+        log_cache_stat(format!(
+            "📚 Cache sizes - Search: {search_size} entries (~{:.2} MB), Volume: {volume_size} entries (~{:.2} MB)",
             search_weight as f64 / BYTES_PER_MB as f64,
-            volume_size,
             volume_weight as f64 / BYTES_PER_MB as f64
-        );
+        ));
         self.stats.log_stats();
     }
 }
@@ -597,8 +594,8 @@ mod tests {
     use anyhow::Result;
     use std::net::TcpListener;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     fn make_volume(id: &str) -> Volume {
@@ -676,7 +673,7 @@ mod tests {
 
     #[tokio::test]
     async fn author_search_caches_requested_result_count() -> Result<()> {
-        use axum::{extract::State, routing::get, Json, Router};
+        use axum::{Json, Router, extract::State, routing::get};
         use tokio::net::TcpListener as TokioTcpListener;
 
         #[derive(Clone)]
@@ -757,7 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn caches_genre_search_results() -> Result<()> {
-        use axum::{extract::State, routing::get, Json, Router};
+        use axum::{Json, Router, extract::State, routing::get};
         use std::net::TcpListener;
         use tokio::net::TcpListener as TokioTcpListener;
 
@@ -839,7 +836,7 @@ mod tests {
 
     #[tokio::test]
     async fn caches_publisher_search_results() -> Result<()> {
-        use axum::{extract::State, routing::get, Json, Router};
+        use axum::{Json, Router, extract::State, routing::get};
         use std::net::TcpListener;
         use tokio::net::TcpListener as TokioTcpListener;
 

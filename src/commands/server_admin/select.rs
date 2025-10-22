@@ -5,7 +5,8 @@ use crate::maturity_check::{
 };
 use crate::types::QueryMode;
 use crate::util::{
-    detect_query_mode, format_deadline, get_guild_name, normalize_isbn, pin_polls_enabled,
+    detect_query_mode, format_deadline, get_guild_name, log_error_with_source, normalize_isbn,
+    pin_polls_enabled,
 };
 use crate::*;
 use crate::{types::Context, types::Error};
@@ -453,11 +454,7 @@ pub async fn poll(
                 Ok(msg) => msg,
                 Err(err) => {
                     if announcement_channel_id.is_some() && poll_channel_id != ctx.channel_id() {
-                        eprintln!(
-                            "Couldn't send poll to announcement channel ({}): {}",
-                            poll_channel_id.get(),
-                            err
-                        );
+                        log_error_with_source("Couldn't send poll to announcement channel", &err);
                         poll_channel_id = ctx.channel_id();
                         match poll_channel_id
                             .send_message(
@@ -477,7 +474,7 @@ pub async fn poll(
 
             if should_pin_poll {
                 if let Err(err) = message.pin(&ctx.http()).await {
-                    eprintln!("Couldn't pin selection poll message: {err}");
+                    log_error_with_source("Couldn't pin selection poll message", &err);
                 }
             }
 
@@ -941,11 +938,7 @@ async fn select_book(
                 {
                     Ok(message) => announcement_message = Some(message),
                     Err(err) => {
-                        eprintln!(
-                            "Couldn't send selection announcement to channel {}: {}",
-                            channel.get(),
-                            err
-                        );
+                        log_error_with_source("Couldn't send selection announcement", &err);
                     }
                 }
             }
@@ -964,7 +957,10 @@ async fn select_book(
                     match message.pin(&ctx.http()).await {
                         Ok(_) => pinned = true,
                         Err(err) => {
-                            eprintln!("Couldn't pin selection announcement message: {err}");
+                            log_error_with_source(
+                                "Couldn't pin selection announcement message",
+                                &err,
+                            );
                         }
                     }
                 }
@@ -974,14 +970,18 @@ async fn select_book(
                         match handle.message().await {
                             Ok(msg) => {
                                 if let Err(err) = msg.pin(&ctx.http()).await {
-                                    eprintln!("Couldn't pin selection confirmation message: {err}");
+                                    log_error_with_source(
+                                        "Couldn't pin selection confirmation message",
+                                        &err,
+                                    );
                                 } else {
                                     pinned = true;
                                 }
                             }
                             Err(err) => {
-                                eprintln!(
-                                    "Couldn't fetch selection confirmation message for pinning: {err}"
+                                log_error_with_source(
+                                    "Couldn't fetch selection confirmation message for pinning",
+                                    &err,
                                 );
                             }
                         }
@@ -1020,16 +1020,18 @@ async fn select_book(
                         match fallback.message().await {
                             Ok(msg) => {
                                 if let Err(err) = msg.pin(&ctx.http()).await {
-                                    eprintln!(
-                                        "Couldn't pin fallback selection confirmation message: {err}"
+                                    log_error_with_source(
+                                        "Couldn't pin fallback selection confirmation message",
+                                        &err,
                                     );
                                 } else {
                                     pinned = true;
                                 }
                             }
                             Err(err) => {
-                                eprintln!(
-                                    "Couldn't fetch fallback selection confirmation message for pinning: {err}"
+                                log_error_with_source(
+                                    "Couldn't fetch fallback selection confirmation message for pinning",
+                                    &err,
                                 );
                             }
                         }

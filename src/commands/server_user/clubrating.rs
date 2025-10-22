@@ -223,9 +223,7 @@ pub async fn clubrating(
                         total_pages
                     )
                 } else if result_bool {
-                    format!(
-                        "Multiple books found. • Powered by Google Books API"
-                    )
+                    format!("Multiple books found. • Powered by Google Books API")
                 } else {
                     format!("Powered by Google Books API")
                 };

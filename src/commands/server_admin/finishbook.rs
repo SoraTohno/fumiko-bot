@@ -2,7 +2,7 @@ use crate::database_helpers::finish_book_transactional;
 use crate::maturity_check::{
     check_volume_maturity, current_channel_is_nsfw, server_maturity_enabled,
 };
-use crate::util::pin_polls_enabled;
+use crate::util::{log_error, log_error_with_source, pin_polls_enabled};
 use crate::{poll_handler, types::Context, types::Error};
 use poise::serenity_prelude::{
     CreateEmbed, CreateEmbedFooter, CreateMessage, CreatePoll, CreatePollAnswer,
@@ -131,15 +131,12 @@ pub async fn finishbook(ctx: Context<'_>) -> Result<(), Error> {
             if let Some(poll) = message.poll.as_ref() {
                 poll_handler::cache_rating_poll_answers(message.id, poll).await;
             } else {
-                eprintln!(
-                    "Created rating poll message {} but no poll payload was returned",
-                    message.id
-                );
+                log_error("Created rating poll message but no poll payload was returned");
             }
 
             if should_pin_poll {
                 if let Err(err) = message.pin(&ctx.http()).await {
-                    eprintln!("Couldn't pin poll message: {err}");
+                    log_error_with_source("Couldn't pin poll message", &err);
                 }
             }
 
@@ -161,9 +158,8 @@ pub async fn finishbook(ctx: Context<'_>) -> Result<(), Error> {
 
             let same_channel = channel_id == ctx.channel_id();
 
-            let mut confirmation_embed = CreateEmbed::default()
-                .title("Poll Posted")
-                .color(0xB76E79);
+            let mut confirmation_embed =
+                CreateEmbed::default().title("Poll Posted").color(0xB76E79);
 
             if same_channel {
                 confirmation_embed = confirmation_embed.description("Poll posted in this channel.");

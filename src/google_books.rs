@@ -1,5 +1,5 @@
-use crate::util::truncate_on_char_boundary;
-use anyhow::{anyhow, Context, Result};
+use crate::util::{log_error_with_source, truncate_on_char_boundary};
+use anyhow::{Context, Result, anyhow};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
@@ -340,13 +340,11 @@ impl GoogleBooksClient {
             }
         }
 
-        let requested_path = url.path().to_owned();
         let response = self.client.get(url).send().await.with_context(|| {
             format!("Failed to send Google Books request for volume {volume_id}")
         })?;
 
         let status = response.status();
-        let response_host = response.url().host_str().unwrap_or("").to_owned();
         let body = response.text().await.with_context(|| {
             format!("Failed to read Google Books response body for volume {volume_id}")
         })?;
@@ -354,14 +352,15 @@ impl GoogleBooksClient {
         if !status.is_success() {
             let reason = status.canonical_reason().unwrap_or("Unknown");
             let truncated_body = truncate(&body, 900);
-            eprintln!(
-                "Google Books API returned {} {} for volume {} ({}{}): {}",
+            let details = format!(
+                "status {} {} body {}",
                 status.as_u16(),
                 reason,
-                volume_id,
-                response_host,
-                requested_path,
                 truncated_body
+            );
+            log_error_with_source(
+                "Google Books API returned an error for volume request",
+                &details,
             );
             return Err(anyhow!(
                 "Google Books API error for volume {} (status {} {}): {}",
@@ -374,10 +373,8 @@ impl GoogleBooksClient {
 
         let volume: Volume = serde_json::from_str(&body).map_err(|e| {
             let truncated_body = truncate(&body, 900);
-            eprintln!(
-                "Failed to decode Google Books response for volume {} ({}{}): {e}; body: {}",
-                volume_id, response_host, requested_path, truncated_body
-            );
+            let details = format!("error {e}; body {truncated_body}");
+            log_error_with_source("Failed to decode Google Books response", &details);
             anyhow!(
                 "Failed to decode Google Books Volume JSON: {e}; body: {}",
                 truncated_body

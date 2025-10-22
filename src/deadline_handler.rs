@@ -5,7 +5,7 @@ use crate::maturity_check::{
 };
 use crate::poll_handler;
 use crate::types::Error;
-use crate::util::{format_deadline, pin_polls_enabled};
+use crate::util::{format_deadline, log_error, log_error_with_source, pin_polls_enabled};
 use poise::serenity_prelude as serenity;
 use serenity::{CreateEmbed, CreateEmbedFooter, CreateMessage, CreatePoll, CreatePollAnswer};
 use sqlx::PgPool;
@@ -23,7 +23,7 @@ pub fn spawn_deadline_watcher(
         loop {
             interval.tick().await;
             if let Err(err) = process_deadlines(&http, &pool, &google_books).await {
-                eprintln!("deadline watcher error: {err}");
+                log_error_with_source("Deadline watcher error", &err);
             }
         }
     });
@@ -142,24 +142,26 @@ async fn process_deadlines(
                                 if let Some(poll) = message.poll.as_ref() {
                                     poll_handler::cache_rating_poll_answers(message.id, poll).await;
                                 } else {
-                                    eprintln!(
-                                        "Auto-finish rating poll message {} missing poll payload",
-                                        message.id
+                                    log_error(
+                                        "Auto-finish rating poll message missing poll payload",
                                     );
                                 }
 
                                 if should_pin_poll {
                                     if let Err(err) = message.pin(http).await {
-                                        eprintln!("Couldn't pin auto-finish poll message: {err}");
+                                        log_error_with_source(
+                                            "Couldn't pin auto-finish poll message",
+                                            &err,
+                                        );
                                     }
                                 }
                                 poll_message_id = Some(message.id);
                                 poll_channel_id = Some(channel_id.get() as i64);
                             }
                             Err(err) => {
-                                eprintln!(
-                                    "Failed to send auto-completion message to channel {}: {}",
-                                    channel_id, err
+                                log_error_with_source(
+                                    "Failed to send auto-completion message",
+                                    &err,
                                 );
                             }
                         }
@@ -199,10 +201,7 @@ async fn process_deadlines(
                 }
             }
             Err(err) => {
-                eprintln!(
-                    "Failed to auto-complete book for server {}: {}",
-                    server_id, err
-                );
+                log_error_with_source("Failed to auto-complete book", &err);
             }
         }
     }

@@ -1,6 +1,7 @@
 use crate::google_books_cache::CachedGoogleBooksClient;
 use crate::poll_handler;
 use crate::types::Error;
+use crate::util::log_error_with_source;
 use poise::serenity_prelude as serenity;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ pub fn spawn_selection_poll_watcher(
         loop {
             interval.tick().await;
             if let Err(err) = check_expired_polls(&http, &pool, &google_books).await {
-                eprintln!("Selection poll watcher error: {}", err);
+                log_error_with_source("Selection poll watcher error", &err);
             }
         }
     });
@@ -44,11 +45,6 @@ async fn check_expired_polls(
         let channel_id = serenity::ChannelId::new(poll.channel_id as u64);
         let message_id = serenity::MessageId::new(poll.message_id as u64);
 
-        println!(
-            "Processing expired selection poll: message={} channel={}",
-            message_id, channel_id
-        );
-
         // Use the existing poll completion check
         if let Err(err) = poll_handler::check_poll_for_completion_public(
             http,
@@ -59,7 +55,7 @@ async fn check_expired_polls(
         )
         .await
         {
-            eprintln!("Error processing expired poll {}: {}", message_id, err);
+            log_error_with_source("Error processing expired poll", &err);
         }
     }
 

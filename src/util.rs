@@ -1,8 +1,10 @@
 use crate::types;
 use crate::types::{Context as PoiseContext, QueryMode};
 use poise::serenity_prelude::{self as serenity, CreateEmbedAuthor};
+use regex::Regex;
 use sqlx::postgres::PgPool;
 use sqlx::types::chrono::{DateTime, Utc};
+use std::sync::OnceLock;
 
 pub async fn ensure_user_exists(pool: &PgPool, user: &serenity::User) -> Result<(), types::Error> {
     sqlx::query!(
@@ -102,7 +104,7 @@ pub async fn get_guild_name(ctx: &PoiseContext<'_>) -> String {
                     }
                 }
 
-                eprintln!("Failed to fetch guild {} name: {}", guild_id.get(), err);
+                log_error_with_source("Failed to fetch guild name", &err);
                 format!("Server {}", guild_id.get())
             }
         }
@@ -129,13 +131,48 @@ pub async fn get_guild_icon_url(ctx: &PoiseContext<'_>) -> Option<String> {
                     }
                 }
 
-                eprintln!("Failed to fetch guild {} icon: {}", guild_id.get(), err);
+                log_error_with_source("Failed to fetch guild icon", &err);
                 None
             }
         }
     } else {
         None
     }
+}
+
+fn mention_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"<[@#&][^>]+>").expect("valid mention regex"))
+}
+
+fn id_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\b\d{10,}\b").expect("valid id regex"))
+}
+
+fn user_tag_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"@[A-Za-z0-9_]{2,32}").expect("valid user tag regex"))
+}
+
+pub fn anonymize_log_message(message: &str) -> String {
+    let without_mentions = mention_regex().replace_all(message, "[redacted]");
+    let without_ids = id_regex().replace_all(&without_mentions, "[id]");
+    user_tag_regex()
+        .replace_all(&without_ids, "@redacted")
+        .to_string()
+}
+
+pub fn log_error(message: impl AsRef<str>) {
+    eprintln!("{}", anonymize_log_message(message.as_ref()));
+}
+
+pub fn log_error_with_source(message: &str, err: &impl std::fmt::Display) {
+    log_error(format!("{message}: {err}"));
+}
+
+pub fn log_cache_stat(message: impl AsRef<str>) {
+    println!("{}", anonymize_log_message(message.as_ref()));
 }
 
 pub fn embed_author_with_icon(

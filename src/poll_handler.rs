@@ -6,7 +6,7 @@ use crate::maturity_check::{
     server_maturity_enabled_by_id,
 };
 use crate::types::{Data, Error};
-use crate::util::{format_deadline, pin_polls_enabled};
+use crate::util::{format_deadline, log_error, log_error_with_source, pin_polls_enabled};
 
 use poise::serenity_prelude as serenity;
 use sqlx::PgPool;
@@ -84,7 +84,7 @@ async fn resolve_rating_choice(
     let poll = match message.poll {
         Some(poll) => poll,
         None => {
-            eprintln!("Poll not present on message {}", message_id);
+            log_error("Poll missing when retrieving poll details");
             return Ok(None);
         }
     };
@@ -120,10 +120,7 @@ pub async fn handle_event(
 
             if is_new.unwrap_or(false) {
                 if let Err(err) = send_welcome_message(ctx, guild).await {
-                    eprintln!(
-                        "Failed to send welcome message to guild {}: {err}",
-                        guild.id
-                    );
+                    log_error_with_source("Failed to send welcome message", &err);
                 }
             }
         }
@@ -138,11 +135,6 @@ pub async fn handle_event(
             let message_id = event.message_id;
             let user_id = event.user_id;
             let answer_id = event.answer_id;
-
-            println!(
-                "Poll vote added: channel={} message={} user={} answer={}",
-                channel_id, message_id, user_id, answer_id
-            );
 
             // Check if this is a rating poll and process the vote
             process_rating_vote_add(&ctx.http, &data.database, message_id, user_id, answer_id)
@@ -160,15 +152,10 @@ pub async fn handle_event(
         }
 
         serenity::FullEvent::MessagePollVoteRemove { event } => {
-            let channel_id = event.channel_id;
+            let _channel_id = event.channel_id;
             let message_id = event.message_id;
             let user_id = event.user_id;
             let answer_id = event.answer_id;
-
-            println!(
-                "Poll vote removed: channel={} message={} user={} answer={}",
-                channel_id, message_id, user_id, answer_id
-            );
 
             // Check if this is a rating poll and process the vote removal
             process_rating_vote_remove(&ctx.http, &data.database, message_id, user_id, answer_id)
@@ -222,9 +209,9 @@ fn select_welcome_channel(
     let bot_member = fetch_bot_member(ctx, guild)?;
 
     let channel_has_send_permissions = |channel: &serenity::GuildChannel| {
-    let perms = guild.user_permissions_in(channel, &bot_member);
-    perms.contains(serenity::Permissions::VIEW_CHANNEL) 
-        && perms.contains(serenity::Permissions::SEND_MESSAGES)
+        let perms = guild.user_permissions_in(channel, &bot_member);
+        perms.contains(serenity::Permissions::VIEW_CHANNEL)
+            && perms.contains(serenity::Permissions::SEND_MESSAGES)
     };
 
     if let Some(channel_id) = guild.system_channel_id {
@@ -265,10 +252,7 @@ async fn send_welcome_message(
     };
 
     let Some(bot_member) = fetch_bot_member(ctx, guild) else {
-        eprintln!(
-            "Failed to locate bot member when sending welcome message in guild {}",
-            guild.id
-        );
+        log_error("Failed to locate bot member when sending welcome message");
         return Ok(());
     };
 
@@ -276,17 +260,14 @@ async fn send_welcome_message(
 
     let embed = serenity::CreateEmbed::default()
         .title("Thank you for inviting Fumiko!")
-        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like Fumiko's announcement channel and mature content configuration.\n\n**Important:** Please make sure that Fumiko has the necessary permissions to view and send messages in any channels you intend for Fumiko to be used in!\n\nVisit [fumiko.dev/commands](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nYou can visit [fumiko.dev/guide](https://fumiko.dev/guide) for a quick explanation on how to use Fumiko bot.\n\nHappy Reading!")
+        .description("It is recommended that you run the `/setup` and `/config` commands to tailor the bot to your community for things like Fumiko's announcement channel and mature content configuration.\n\nPlease make sure that Fumiko has the necessary permissions to view and send messages in any channels you intend for Fumiko to be used in!\n\nVisit [fumiko.dev/commands](https://fumiko.dev/commands) or run `/help` to view the available commands.\n\nYou can visit [fumiko.dev/guide](https://fumiko.dev/guide) for a quick explanation on how to use Fumiko bot.\n\nHappy Reading!")
         .color(0xB76E79);
 
     let message = serenity::CreateMessage::new().embed(embed);
 
     if permissions.contains(serenity::Permissions::EMBED_LINKS) {
         if let Err(err) = channel_id.send_message(&ctx.http, message).await {
-            eprintln!(
-                "Failed to send welcome embed to guild {} in channel {}: {err}",
-                guild.id, channel_id
-            );
+            log_error_with_source("Failed to send welcome embed", &err);
 
             // Retry without the embed if embeds are disallowed or another error occurred.
             channel_id
@@ -308,10 +289,7 @@ async fn send_welcome_message(
             )
             .await?;
     } else {
-        eprintln!(
-            "No accessible channel found for welcome message in guild {}",
-            guild.id
-        );
+        log_error("No accessible channel found for welcome message");
     }
 
     Ok(())
@@ -339,10 +317,7 @@ async fn process_rating_vote_add(
         let channel_id = serenity::ChannelId::new(rating_poll.channel_id as u64);
         let Some(rating) = resolve_rating_choice(http, channel_id, message_id, answer_id).await?
         else {
-            eprintln!(
-                "Could not map answer_id {} to any poll answer for message {}",
-                answer_id, message_id
-            );
+            log_error("Could not map poll answer to rating option");
             return Ok(());
         };
 
@@ -366,7 +341,7 @@ async fn process_rating_vote_add(
         .await?;
 
         // verify rollup updated
-        if let Ok(book_info) = sqlx::query! {
+        let _ = sqlx::query! {
             r#"
             SELECT average_rating, total_ratings
             FROM server_completed_books
@@ -374,15 +349,8 @@ async fn process_rating_vote_add(
             "#,
             rating_poll.completed_id
         }
-        .fetch_one(pool)
-        .await
-        {
-            println!(
-                "Book now has average rating: {:?} from {} ratings",
-                book_info.average_rating,
-                book_info.total_ratings.unwrap_or(0)
-            );
-        }
+        .fetch_optional(pool)
+        .await?;
     }
 
     Ok(())
@@ -420,30 +388,17 @@ async fn process_rating_vote_remove(
         match result {
             Ok(rows) => {
                 if rows.rows_affected() > 0 {
-                    println!(
-                        "Removed rating for user {} for completed_id {}",
-                        user_id, rating_poll.completed_id
-                    );
-
-                    // The trigger should automatically update the average rating
-                    if let Ok(book_info) = sqlx::query!(
-                        "SELECT average_rating, total_ratings FROM server_completed_books 
+                    let _ = sqlx::query!(
+                        "SELECT average_rating, total_ratings FROM server_completed_books
                          WHERE completed_id = $1",
                         rating_poll.completed_id
                     )
-                    .fetch_one(pool)
-                    .await
-                    {
-                        println!(
-                            "Book now has average rating: {:?} from {} ratings",
-                            book_info.average_rating,
-                            book_info.total_ratings.unwrap_or(0)
-                        );
-                    }
+                    .fetch_optional(pool)
+                    .await?;
                 }
             }
             Err(e) => {
-                eprintln!("Error removing rating: {}", e);
+                log_error_with_source("Error removing rating", &e);
             }
         }
     }
@@ -469,10 +424,7 @@ async fn handle_missing_poll_message(
         let already_processed = rating_poll.processed.unwrap_or(false);
 
         if already_processed {
-            println!(
-                "Rating poll message {} in channel {} already processed when fetch failed (server {}): {}",
-                message_id, channel_id, rating_poll.server_id, error_message
-            );
+            log_error("Rating poll fetch failed after processing was already completed");
         } else {
             sqlx::query!(
                 "UPDATE rating_polls SET processed = TRUE WHERE message_id = $1",
@@ -480,11 +432,7 @@ async fn handle_missing_poll_message(
             )
             .execute(pool)
             .await?;
-
-            println!(
-                "Rating poll message {} in channel {} closed after fetch failure (server {}): {}",
-                message_id, channel_id, rating_poll.server_id, error_message
-            );
+            log_error("Rating poll fetch failed; poll marked as processed");
         }
 
         purge_rating_poll_cache_entry(message_id).await;
@@ -510,38 +458,17 @@ async fn handle_missing_poll_message(
         }
 
         if already_processed {
-            println!(
-                "Selection poll message {} in channel {} already processed when fetch failed (server {}): {}",
-                message_id,
-                channel_id,
-                selection_poll.server_id,
-                error_message
-            );
+            log_error("Selection poll fetch failed after processing was already completed");
         } else if selection_poll.selected_volume_id.is_some() {
-            println!(
-                "Selection poll message {} in channel {} closed and cleared stale winner after fetch failure (server {}): {}",
-                message_id,
-                channel_id,
-                selection_poll.server_id,
-                error_message
-            );
+            log_error("Selection poll fetch failed; cleared stored winner");
         } else {
-            println!(
-                "Selection poll message {} in channel {} closed after fetch failure (server {}): {}",
-                message_id,
-                channel_id,
-                selection_poll.server_id,
-                error_message
-            );
+            log_error("Selection poll fetch failed; poll marked as processed");
         }
 
         return Ok(());
     }
 
-    println!(
-        "Poll message {} in channel {} could not be fetched and no database row was found: {}",
-        message_id, channel_id, error_message
-    );
+    log_error("Poll fetch failed and no database entry was found");
 
     Ok(())
 }
@@ -669,10 +596,6 @@ async fn process_poll_completion(
                 .await;
         }
 
-        println!(
-            "Rating poll {} has been processed and finalized.",
-            message_id
-        );
         purge_rating_poll_cache_entry(message_id).await;
         return Ok(());
     }
@@ -747,7 +670,7 @@ async fn process_poll_completion(
 
             // Validate index bounds
             if winning_index >= selection_poll.book_options.len() {
-                eprintln!("Warning: Winning index {} out of bounds", winning_index);
+                log_error("Selection poll winning index out of bounds");
                 sqlx::query!(
                     "UPDATE selection_polls SET processed = TRUE WHERE message_id = $1",
                     message_id_i64
@@ -764,10 +687,7 @@ async fn process_poll_completion(
             let volume = match google_books.get_volume(winning_volume_id).await {
                 Ok(v) => Some(v),
                 Err(e) => {
-                    eprintln!(
-                        "Failed to fetch volume {} for maturity check: {}",
-                        winning_volume_id, e
-                    );
+                    log_error_with_source("Failed to fetch volume for maturity check", &e);
                     None
                 }
             };
@@ -887,11 +807,7 @@ async fn process_poll_completion(
                     {
                         Ok(msg) => announcement_message = Some(msg),
                         Err(err) => {
-                            eprintln!(
-                                "Couldn't send selection announcement to channel {}: {}",
-                                target_channel.get(),
-                                err
-                            );
+                            log_error_with_source("Couldn't send selection announcement", &err);
 
                             if target_channel != channel_id {
                                 match channel_id
@@ -903,9 +819,9 @@ async fn process_poll_completion(
                                 {
                                     Ok(msg) => announcement_message = Some(msg),
                                     Err(fallback_err) => {
-                                        eprintln!(
-                                            "Couldn't send selection fallback announcement to channel {}: {}",
-                                            channel_id, fallback_err
+                                        log_error_with_source(
+                                            "Couldn't send selection fallback announcement",
+                                            &fallback_err,
                                         );
                                     }
                                 }
@@ -916,7 +832,10 @@ async fn process_poll_completion(
                     if should_pin_announcements {
                         if let Some(message) = announcement_message.as_ref() {
                             if let Err(err) = message.pin(http).await {
-                                eprintln!("Couldn't pin selection announcement message: {err}");
+                                log_error_with_source(
+                                    "Couldn't pin selection announcement message",
+                                    &err,
+                                );
                             }
                         }
                     }
